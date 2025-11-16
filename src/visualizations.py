@@ -5,6 +5,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import timedelta
+from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
+from math import sqrt
+
 
 
 def visualize_aqi_comparison(historic_data, aqs_data, city_focus, pollutant_focus):
@@ -203,19 +206,19 @@ def visualize_aqi_comparison(historic_data, aqs_data, city_focus, pollutant_focu
                                 print(f"  Date range: {aqs_daily['date_only'].min()} to {aqs_daily['date_only'].max()}")
                                 print(f"  Daily average AQI data points: {len(aqs_daily)}")
                         else:
-                            print(f"✗ No valid AQI column found in EPA data")
+                            print(f" No valid AQI column found in EPA data")
                     else:
-                        print(f"✗ No EPA data found for {city_focus} in the recent month")
+                        print(f" No EPA data found for {city_focus} in the recent month")
                 else:
-                    print(f"✗ No EPA data found for city: {city_focus}")
+                    print(f"No EPA data found for city: {city_focus}")
                     print(f"   Available cities in EPA data: {aqs_data[city_col_aqs].unique()[:10].tolist()}")
             else:
-                print(f"✗ Could not find city column in EPA data")
+                print(f" Could not find city column in EPA data")
                 print(f"   Available columns: {aqs_data.columns.tolist()}")
         else:
-            print(f"✗ EPA data (aqs_data) is not available or empty")
+            print(f" EPA data (aqs_data) is not available or empty")
     except Exception as e:
-        print(f"✗ Error processing EPA AQS data: {e}")
+        print(f" Error processing EPA AQS data: {e}")
         import traceback
         traceback.print_exc()
 
@@ -227,4 +230,309 @@ def visualize_aqi_comparison(historic_data, aqs_data, city_focus, pollutant_focu
     plt.show()
 
 
-# Model comparison visualizations can be added here in the future
+# =============================================================================
+# PREDICTION VISUALIZATIONS
+# =============================================================================
+
+def plot_3day_forecast(live_value, predictions_3day, pollutant="AQI", 
+                       title="3-Day Forecast from Live Observation", figsize=(12, 6)):
+    """
+    Plot single live data point with 3-day dotted forecast.
+    
+    Perfect for real-time user-facing displays. Shows today's observation
+    as a solid blue point, followed by 3-day forecast as dotted line.
+    
+    Features:
+    - Automatic trend analysis (WORSENING/IMPROVING/STABLE)
+    - Color-coded day labels
+    - Shaded forecast zone
+    - Value annotations
+    
+    Parameters:
+    -----------
+    live_value : float
+        Current/today's AQI value
+    predictions_3day : array-like
+        3 predictions for days +1, +2, +3
+    pollutant : str
+        Pollutant name for labels
+    title : str
+        Plot title
+    figsize : tuple
+        Figure size (width, height)
+    
+    Returns:
+    --------
+    fig, ax : matplotlib figure and axes objects
+    """
+    predictions = np.array(predictions_3day)
+    if len(predictions) != 3:
+        raise ValueError(f"Expected 3 predictions, got {len(predictions)}")
+    
+    time_points = np.array([0, 1, 2, 3])
+    values = np.array([live_value, predictions[0], predictions[1], predictions[2]])
+    
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Today (solid line)
+    ax.plot(0, live_value, 'o', markersize=14, color='#1f77b4', 
+           label='Today (Live Observation)', zorder=5, markeredgecolor='navy', markeredgewidth=2)
+    
+    # Forecast (dotted line)
+    ax.plot([0, 1, 2, 3], values, 's--', linewidth=3, markersize=10, 
+           color='#ff7f0e', label='3-Day Forecast', alpha=0.8, 
+           markeredgecolor='darkorange', markeredgewidth=1.5)
+    ax.plot([1, 2, 3], predictions, 's--', linewidth=3, markersize=10,
+           color='#ff7f0e', alpha=0.8)
+    
+    # Shaded forecast zone
+    ax.axvspan(0.5, 3.5, alpha=0.1, color='#ff7f0e', label='Forecast Period')
+    ax.axvline(x=0.5, color='gray', linestyle=':', linewidth=2, alpha=0.5)
+    
+    # Annotations
+    ax.text(0, live_value + 2, f'TODAY\n{live_value:.1f}', 
+           ha='center', fontsize=10, fontweight='bold',
+           bbox=dict(boxstyle='round,pad=0.5', facecolor='#1f77b4', alpha=0.8, edgecolor='navy'),
+           color='white')
+    
+    day_colors = ['#2ecc71', '#3498db', '#e74c3c']
+    for i, (pred, color) in enumerate(zip(predictions, day_colors)):
+        day_num = i + 1
+        ax.text(day_num, pred - 2, f'Day +{day_num}\n{pred:.1f}', 
+               ha='center', fontsize=10, fontweight='bold',
+               bbox=dict(boxstyle='round,pad=0.5', facecolor=color, alpha=0.8, edgecolor='black'),
+               color='white')
+    
+    # Trend analysis
+    trend = predictions[0] - live_value
+    if abs(trend) < 0.5:
+        trend_text = "STABLE"
+        trend_color = '#95a5a6'
+    elif trend > 0:
+        trend_text = "WORSENING"
+        trend_color = '#e74c3c'
+    else:
+        trend_text = "IMPROVING"
+        trend_color = '#2ecc71'
+    
+    ax.text(1.5, ax.get_ylim()[1] * 0.95, 
+           f'{trend_text} (Δ {trend:+.1f})', 
+           ha='center', fontsize=11, fontweight='bold',
+           bbox=dict(boxstyle='round,pad=0.7', facecolor=trend_color, alpha=0.9, edgecolor='black'),
+           color='white')
+    
+    # Formatting
+    ax.set_xticks([0, 1, 2, 3])
+    ax.set_xticklabels(['Today\n(Now)', 'Tomorrow\n(+1 day)', 'In 2 Days\n(+2 days)', 'In 3 Days\n(+3 days)'],
+                       fontsize=10, fontweight='bold')
+    ax.set_xlabel('Forecast Timeline', fontsize=12, fontweight='bold')
+    ax.set_ylabel(f'{pollutant} Index', fontsize=12, fontweight='bold')
+    ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+    ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    ax.grid(True, alpha=0.2, linestyle='--', linewidth=0.5, axis='y')
+    ax.legend(fontsize=11, loc='upper left', framealpha=0.95)
+    ax.set_ylim(min(values) - 8, max(values) + 12)
+    ax.set_facecolor('#f8f9fa')
+    
+    # Use larger margins to prevent annotation cutoff (top/bottom)
+    fig.subplots_adjust(left=0.08, right=0.95, top=0.85, bottom=0.15)
+    
+    return fig, ax
+
+def plot_predictions_comparison(y_actual, y_pred, title_prefix, pollutant, figsize=(16, 12)):
+    """
+    Create comprehensive 5-panel visualization for model evaluation.
+    
+    Panels:
+    1. Time series overlay (actual vs predicted)
+    2. Per-day scatter plot
+    3. Error boxplot by day
+    4. Residuals plot
+    5. Error histogram
+    
+    Parameters:
+    -----------
+    y_actual : np.ndarray
+        Actual values (can be 2D for multi-day forecasts)
+    y_pred : np.ndarray
+        Predicted values (same shape as y_actual)
+    title_prefix : str
+        Prefix for plot titles
+    pollutant : str
+        Pollutant name
+    figsize : tuple
+        Figure size
+    
+    Returns:
+    --------
+    fig : matplotlib figure object
+    """
+    # Flatten if multi-day predictions
+    if len(y_actual.shape) > 1:
+        actual_flat = y_actual.flatten()
+        pred_flat = y_pred.flatten()
+    else:
+        actual_flat = y_actual
+        pred_flat = y_pred
+    
+    # Calculate metrics
+    mae = mean_absolute_error(actual_flat, pred_flat)
+    rmse = sqrt(mean_squared_error(actual_flat, pred_flat))
+    r2 = 1 - (np.sum((actual_flat - pred_flat)**2) / 
+              np.sum((actual_flat - np.mean(actual_flat))**2))
+    residuals = actual_flat - pred_flat
+    
+    fig = plt.figure(figsize=figsize)
+    
+    # Panel 1: Time series
+    ax1 = plt.subplot(2, 3, 1)
+    time_idx = np.arange(len(actual_flat))
+    ax1.plot(time_idx, actual_flat, 'o-', label='Actual', color='#1f77b4', linewidth=2)
+    ax1.plot(time_idx, pred_flat, 's--', label='Predicted', color='#ff7f0e', linewidth=2)
+    ax1.fill_between(time_idx, actual_flat, pred_flat, alpha=0.2, color='#ff7f0e')
+    ax1.set_title(f'{title_prefix}: Time Series Overlay', fontweight='bold')
+    ax1.set_ylabel(f'{pollutant} AQI', fontweight='bold')
+    ax1.legend(fontsize=9)
+    ax1.grid(True, alpha=0.3)
+    
+    # Panel 2: Scatter
+    ax2 = plt.subplot(2, 3, 2)
+    ax2.scatter(actual_flat, pred_flat, alpha=0.6, s=40, color='#2ca02c')
+    lims = [np.min([actual_flat.min(), pred_flat.min()]),
+            np.max([actual_flat.max(), pred_flat.max()])]
+    ax2.plot(lims, lims, 'r--', lw=2, label='Perfect Prediction')
+    ax2.set_xlabel('Actual', fontweight='bold')
+    ax2.set_ylabel('Predicted', fontweight='bold')
+    ax2.set_title('Actual vs Predicted', fontweight='bold')
+    ax2.legend(fontsize=9)
+    ax2.grid(True, alpha=0.3)
+    
+    # Panel 3: Residuals
+    ax3 = plt.subplot(2, 3, 3)
+    ax3.scatter(actual_flat, residuals, alpha=0.6, s=40, color='#d62728')
+    ax3.axhline(y=0, color='k', linestyle='--', lw=2)
+    ax3.set_xlabel('Actual', fontweight='bold')
+    ax3.set_ylabel('Residuals', fontweight='bold')
+    ax3.set_title('Residuals Plot', fontweight='bold')
+    ax3.grid(True, alpha=0.3)
+    
+    # Panel 4: Error distribution
+    ax4 = plt.subplot(2, 3, 4)
+    errors = np.abs(residuals)
+    ax4.hist(errors, bins=30, color='#9467bd', alpha=0.7, edgecolor='black')
+    ax4.axvline(np.mean(errors), color='r', linestyle='--', linewidth=2, label=f'Mean={np.mean(errors):.2f}')
+    ax4.set_xlabel('Absolute Error', fontweight='bold')
+    ax4.set_ylabel('Frequency', fontweight='bold')
+    ax4.set_title('Error Distribution', fontweight='bold')
+    ax4.legend(fontsize=9)
+    ax4.grid(True, alpha=0.3, axis='y')
+    
+    # Panel 5: Metrics
+    ax5 = plt.subplot(2, 3, 5)
+    ax5.axis('off')
+    metrics_text = f"""
+    MODEL EVALUATION METRICS
+    ─────────────────────────
+    MAE:   {mae:.4f}
+    RMSE:  {rmse:.4f}
+    R²:    {r2:.4f}
+    
+    RESIDUAL STATISTICS
+    ─────────────────────────
+    Mean:  {np.mean(residuals):+.4f}
+    Std:   {np.std(residuals):.4f}
+    Min:   {np.min(residuals):+.4f}
+    Max:   {np.max(residuals):+.4f}
+    """
+    ax5.text(0.1, 0.5, metrics_text, fontsize=11, family='monospace',
+            verticalalignment='center',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    fig.suptitle(f'{title_prefix} - {pollutant} AQI Forecasting', 
+                fontsize=14, fontweight='bold', y=0.995)
+    
+    fig.subplots_adjust(left=0.08, right=0.95, top=0.93, bottom=0.1)
+    plt.tight_layout(pad=1.5)
+    
+    return fig
+
+
+def model_results_bar_chart(all_results, pollutant_focus, city_focus, figsize=(14, 8)):
+    """
+    Create a bar chart comparing multiple models across key metrics.
+    
+    Parameters:
+    -----------
+    all_results : list
+        List of dictionaries containing model results with metrics
+    pollutant_focus : str
+        Pollutant name for title
+    city_focus : str
+        City name for title
+    figsize : tuple
+        Figure size (width, height)
+    
+    Returns:
+    --------
+    fig : matplotlib figure object
+    """
+    if not all_results:
+        # Create empty figure if no results
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, 'No model results available', 
+               ha='center', va='center', fontsize=14, transform=ax.transAxes)
+        ax.set_title(f"Model Comparison: {pollutant_focus} in {city_focus}", fontsize=14, fontweight='bold')
+        fig.subplots_adjust(left=0.08, right=0.95, top=0.93, bottom=0.1)
+        return fig
+    
+    # Flatten the nested structure: extract model_name and metrics
+    flattened_data = []
+    for result in all_results:
+        if result and isinstance(result, dict):
+            row = {'Model': result.get('model_name', 'Unknown')}
+            # Extract metrics from nested metrics dict
+            if 'metrics' in result and isinstance(result['metrics'], dict):
+                row.update(result['metrics'])
+            flattened_data.append(row)
+    
+    if not flattened_data:
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, 'No model results available', 
+               ha='center', va='center', fontsize=14, transform=ax.transAxes)
+        ax.set_title(f"Model Comparison: {pollutant_focus} in {city_focus}", fontsize=14, fontweight='bold')
+        fig.subplots_adjust(left=0.08, right=0.95, top=0.93, bottom=0.1)
+        return fig
+    
+    results_df = pd.DataFrame(flattened_data)
+    results_df = results_df.set_index('Model')
+    
+    # Filter only metric columns that exist
+    available_metrics = [m for m in ['RMSE', 'MAE', 'MAPE', 'sMAPE'] if m in results_df.columns]
+    
+    if not available_metrics:
+        # If no metrics, show error
+        fig, ax = plt.subplots(figsize=figsize)
+        ax.text(0.5, 0.5, 'No metric data available', 
+               ha='center', va='center', fontsize=14, transform=ax.transAxes)
+        ax.set_title(f"Model Comparison: {pollutant_focus} in {city_focus}", fontsize=14, fontweight='bold')
+        fig.subplots_adjust(left=0.08, right=0.95, top=0.93, bottom=0.1)
+        return fig
+    
+    # Sort by RMSE (best/lowest to worst/highest) for left-to-right ranking
+    # RMSE is the primary metric for model selection
+    if 'RMSE' in results_df.columns:
+        results_df = results_df.sort_values('RMSE')
+
+    fig, ax = plt.subplots(figsize=figsize)
+    results_df[available_metrics].plot(kind='bar', ax=ax)
+    ax.set_title(f"Model Comparison: {pollutant_focus} in {city_focus}\n(Models Ranked Left-to-Right: Best → Worst by RMSE)", 
+                fontsize=14, fontweight='bold')
+    ax.set_ylabel('Error Metric Value', fontsize=12)
+    ax.set_xlabel('Model (Best ← → Worst)', fontsize=12)
+    ax.legend(title='Metrics', fontsize=11)
+    ax.grid(axis='y', alpha=0.3)
+    plt.xticks(rotation=45)
+    fig.subplots_adjust(left=0.08, right=0.95, top=0.90, bottom=0.15)
+    plt.tight_layout(pad=1.5)
+    
+    return fig

@@ -1196,7 +1196,7 @@ def extract_timeseries(historic_data, aqs_data, city, pollutant, combine_sources
         print(f" No valid data after aggregation for {city} - {pollutant}")
         return pd.Series(dtype=float)
     
-    print(f"✓ EPA data extracted: {len(ts_data)} daily observations for {pollutant} in {city}")
+    print(f"EPA data extracted: {len(ts_data)} daily observations for {pollutant} in {city}")
     print(f"  Date range: {ts_data.index.min()} to {ts_data.index.max()}")
     print(f"  AQI range: {ts_data.min():.1f} to {ts_data.max():.1f}")
     
@@ -1244,7 +1244,7 @@ def load_pollution_us_kaggle(file_path, year=2016, city_filter=None, state_filte
         # Load raw data
         print(f"\nReading {file_path}...")
         df = pd.read_csv(file_path)
-        print(f"✓ Loaded {len(df)} raw records")
+        print(f"Loaded {len(df)} raw records")
         
         # Parse date
         df['datetime'] = pd.to_datetime(df['Date Local'])
@@ -1270,7 +1270,7 @@ def load_pollution_us_kaggle(file_path, year=2016, city_filter=None, state_filte
             df = df[df['State'].isin(state_filter)]
             print(f"  Filtered to states: {state_filter}")
         
-        print(f"✓ After filtering: {len(df)} records")
+        print(f"After filtering: {len(df)} records")
         
         # Aggregate to one value per date per city
         # Multiple measurements per date per site → average them
