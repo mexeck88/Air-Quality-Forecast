@@ -38,7 +38,6 @@ The GUI contains:
 air_quality/
 ├── README.md               # Main project documentation
 ├── requirements.txt
-├── .env.example
 │
 ├── data/
 │   └── epa_aqs_data_2025_cleaned.csv
@@ -46,17 +45,13 @@ air_quality/
 ├── src/
 │   ├── air_quality_gui.py      # GUI
 │   ├── data_handler.py         # Data loading, cleaning, API access
-│   ├── models/                 # Forecasting models
-│   │   ├── baseline/
-│   │   ├── statistical/
-│   │   └── deep_learning/
+│   ├── models.py               # Forecasting models
 │   ├── visualizations.py       # Plotting utilities
 │   └── recommendations.py      # Health advisory logic
 │
 └── notebooks/
     ├── 01_data_collection_POC.ipynb
     ├── 02_model_POC.ipynb
-    └── 03_recommendations_demo.ipynb
 ```
 
 ---
