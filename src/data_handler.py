@@ -60,12 +60,12 @@ import requests
 # =================================================================
 # API INITIALIZATION
 #==================================================================
-EPA_EMAIL = "matthew.eckert117@gmail.com"  # Your EPA AQS email
-EPA_API_KEY = "sandheron75"  # Your EPA AQS key from registration email
+EPA_EMAIL = ""  # Your EPA AQS email
+EPA_API_KEY = ""  # Your EPA AQS key from registration email
 EPA_BASE_URL = "https://aqs.epa.gov/data/api"
 
 # AirNow API Configuration
-AIRNOW_API_KEY = "F1BBFDBA-F113-4DD5-B113-99EFED624D60"  # Your AirNow API key
+AIRNOW_API_KEY = "F1BBFDBA-F113-4DD5-B113-99EFED624D60"  # Your AirNow API key - yes this is bad practice, but the API is free, I do not mind others using my key
 AIRNOW_BASE_URL = "https://www.airnowapi.org/aq/observation/zipCode/current/"
 
 # Common pollutant parameter codes for EPA AQS
@@ -1331,4 +1331,5 @@ def get_kaggle_city_data(kaggle_df, city_name):
     pd.DataFrame : Data for specified city, sorted by date
     """
     city_data = kaggle_df[kaggle_df['city'] == city_name].copy()
+
     return city_data.sort_values('datetime').reset_index(drop=True)
