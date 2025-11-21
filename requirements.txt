@@ -1,10 +1,11 @@
 matplotlib
 numpy
 pandas
-request
+requests
 prophet
 seaborn
 scikit-learn
 statsmodels
 tensorflow
 plotly
+
