@@ -48,6 +48,7 @@ from models import (
     predict_cnn,
     evaluate_forecast,
     prepare_data_for_deep_learning,
+    predict_3day_ahead_lstm_cnn,
     create_feature_enriched_sequences
 )
 from visualizations import (
@@ -188,23 +189,51 @@ class ModelTrainer:
             
             self.lstm_model = lstm_output
             
-            # Make predictions
-            y_pred = predict_lstm(lstm_output, lstm_output['X_test'])
+            # LSTM now returns rolling 1-day predictions (not 3-day sequences)
+            y_pred = lstm_output['predictions']  # Shape: (test_size,)
+            y_actual = lstm_output['y_test']      # Shape: (test_size,)
             
-            # Evaluate
-            mae = np.mean(np.abs(lstm_output['y_test'] - y_pred))
-            rmse = np.sqrt(np.mean((lstm_output['y_test'] - y_pred)**2))
+            # Evaluate using same method as notebook (sklearn metrics for consistency)
+            from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
+            from math import sqrt as sqrt_fn
+            
+            mae = mean_absolute_error(y_actual, y_pred)
+            rmse = sqrt_fn(mean_squared_error(y_actual, y_pred))
+            mape = mean_absolute_percentage_error(y_actual, y_pred)
+            
+            # sMAPE calculation
+            numerator = np.abs(y_actual - y_pred)
+            denominator = np.abs(y_actual) + np.abs(y_pred)
+            smape_values = np.divide(numerator, denominator, where=denominator!=0, out=np.zeros_like(numerator))
+            smape = 2 * np.mean(smape_values)
             
             # Create a new metrics dict for this model (don't use shared self.metrics)
             metrics_dict = {
                 'MAE': mae,
                 'RMSE': rmse,
-                'MAPE': np.mean(np.abs((lstm_output['y_test'] - y_pred) / lstm_output['y_test'])) * 100,
-                'sMAPE': 2 * np.mean(np.abs(lstm_output['y_test'] - y_pred) / (np.abs(lstm_output['y_test']) + np.abs(y_pred))) * 100
+                'MAPE': mape,
+                'sMAPE': smape
             }
             
-            # Get latest forecast
-            latest_forecast = y_pred[-1] if len(y_pred) > 0 else np.array([45.2, 45.1, 46.3])
+            # Get 3-day forecast using the new prediction function
+            # Use the last training value as the "live" input for forward prediction
+            try:
+                live_value = float(self.train_data.iloc[-1])
+                forecast_3day = predict_3day_ahead_lstm_cnn(
+                    self.lstm_model['model'],
+                    live_value,
+                    self.train_data
+                )
+            except (ValueError, RuntimeError, TypeError, AttributeError) as e:
+                print(f"Warning: Could not generate 3-day forecast: {e}")
+                # Fallback: use last 3 rolling predictions
+                if len(y_pred) >= 3:
+                    forecast_3day = y_pred[-3:]
+                elif len(y_pred) > 0:
+                    last_val = y_pred[-1]
+                    forecast_3day = np.concatenate([y_pred[-(min(len(y_pred), 3)-1):], [last_val] * max(0, 3 - len(y_pred))])
+                else:
+                    forecast_3day = np.array([45.2, 45.1, 46.3])
             
             print("LSTM training complete!")
             print(f"  RMSE: {metrics_dict['RMSE']:.4f}")
@@ -214,7 +243,7 @@ class ModelTrainer:
                 'metrics': metrics_dict,
                 'y_pred': y_pred,
                 'y_actual': lstm_output['y_test'],
-                'forecast_3day': latest_forecast,
+                'forecast_3day': forecast_3day,
                 'current_aqi': float(self.train_data.iloc[-1]),
                 'model': self.lstm_model
             }
@@ -239,14 +268,18 @@ class ModelTrainer:
             y_pred = predict_prophet(prophet_output, len(self.test_data))
             y_actual = self.test_data.values
             
-            # Calculate all required metrics
-            mae = np.mean(np.abs(y_actual - y_pred))
-            rmse = np.sqrt(np.mean((y_actual - y_pred)**2))
-            mape = np.mean(np.abs((y_actual - y_pred) / y_actual)) * 100
+            # Calculate all required metrics using same method as notebook (sklearn metrics for consistency)
+            from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
+            from math import sqrt as sqrt_fn
+            
+            mae = mean_absolute_error(y_actual, y_pred)
+            rmse = sqrt_fn(mean_squared_error(y_actual, y_pred))
+            mape = mean_absolute_percentage_error(y_actual, y_pred)
             
             numerator = np.abs(y_actual - y_pred)
             denominator = np.abs(y_actual) + np.abs(y_pred)
-            smape = 2 * np.mean(numerator / denominator) * 100
+            smape_values = np.divide(numerator, denominator, where=denominator!=0, out=np.zeros_like(numerator))
+            smape = 2 * np.mean(smape_values)
             
             # Create a new metrics dict for this model (don't use shared self.metrics)
             metrics_dict = {
@@ -282,14 +315,18 @@ class ModelTrainer:
             y_pred = predict_naive(naive_output, len(self.test_data))
             y_actual = self.test_data.values
             
-            # Calculate all required metrics
-            mae = np.mean(np.abs(y_actual - y_pred))
-            rmse = np.sqrt(np.mean((y_actual - y_pred)**2))
-            mape = np.mean(np.abs((y_actual - y_pred) / y_actual)) * 100
+            # Calculate all required metrics using same method as notebook (sklearn metrics for consistency)
+            from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
+            from math import sqrt as sqrt_fn
+            
+            mae = mean_absolute_error(y_actual, y_pred)
+            rmse = sqrt_fn(mean_squared_error(y_actual, y_pred))
+            mape = mean_absolute_percentage_error(y_actual, y_pred)
             
             numerator = np.abs(y_actual - y_pred)
             denominator = np.abs(y_actual) + np.abs(y_pred)
-            smape = 2 * np.mean(numerator / denominator) * 100
+            smape_values = np.divide(numerator, denominator, where=denominator!=0, out=np.zeros_like(numerator))
+            smape = 2 * np.mean(smape_values)
             
             # Create a new metrics dict for this model (don't use shared self.metrics)
             metrics_dict = {
@@ -333,14 +370,18 @@ class ModelTrainer:
             y_pred = predict_arima(arima_output, len(self.test_data))
             y_actual = self.test_data.values
             
-            # Calculate all required metrics
-            mae = np.mean(np.abs(y_actual - y_pred))
-            rmse = np.sqrt(np.mean((y_actual - y_pred)**2))
-            mape = np.mean(np.abs((y_actual - y_pred) / y_actual)) * 100
+            # Calculate all required metrics using same method as notebook (sklearn metrics for consistency)
+            from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
+            from math import sqrt as sqrt_fn
+            
+            mae = mean_absolute_error(y_actual, y_pred)
+            rmse = sqrt_fn(mean_squared_error(y_actual, y_pred))
+            mape = mean_absolute_percentage_error(y_actual, y_pred)
             
             numerator = np.abs(y_actual - y_pred)
             denominator = np.abs(y_actual) + np.abs(y_pred)
-            smape = 2 * np.mean(numerator / denominator) * 100
+            smape_values = np.divide(numerator, denominator, where=denominator!=0, out=np.zeros_like(numerator))
+            smape = 2 * np.mean(smape_values)
             
             # Create a new metrics dict for this model (don't use shared self.metrics)
             metrics_dict = {
@@ -400,18 +441,23 @@ class ModelTrainer:
             
             self.cnn_model = cnn_output
             
-            # Make predictions
-            y_pred = predict_cnn(cnn_output, cnn_output['X_test'])
-            y_actual = cnn_output['y_test']
+            # CNN now returns rolling 1-day predictions (not 3-day sequences)
+            y_pred = cnn_output['predictions']  # Shape: (test_size,)
+            y_actual = cnn_output['y_test']     # Shape: (test_size,)
             
-            # Calculate all required metrics
-            mae = np.mean(np.abs(y_actual - y_pred))
-            rmse = np.sqrt(np.mean((y_actual - y_pred)**2))
-            mape = np.mean(np.abs((y_actual - y_pred) / y_actual)) * 100
+            # Calculate all required metrics using same method as notebook (sklearn metrics for consistency)
+            from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
+            from math import sqrt as sqrt_fn
             
+            mae = mean_absolute_error(y_actual, y_pred)
+            rmse = sqrt_fn(mean_squared_error(y_actual, y_pred))
+            mape = mean_absolute_percentage_error(y_actual, y_pred)
+            
+            # sMAPE calculation
             numerator = np.abs(y_actual - y_pred)
             denominator = np.abs(y_actual) + np.abs(y_pred)
-            smape = 2 * np.mean(numerator / denominator) * 100
+            smape_values = np.divide(numerator, denominator, where=denominator!=0, out=np.zeros_like(numerator))
+            smape = 2 * np.mean(smape_values)
             
             # Create a new metrics dict for this model (don't use shared self.metrics)
             metrics_dict = {
@@ -421,8 +467,25 @@ class ModelTrainer:
                 'sMAPE': smape
             }
             
-            # Get latest forecast (3-day ahead)
-            latest_forecast = y_pred[-1] if len(y_pred) > 0 else np.array([45.2, 45.1, 46.3])
+            # Get 3-day forecast using the new prediction function
+            # Use the last training value as the "live" input for forward prediction
+            try:
+                live_value = float(self.train_data.iloc[-1])
+                forecast_3day = predict_3day_ahead_lstm_cnn(
+                    self.cnn_model['model'],
+                    live_value,
+                    self.train_data
+                )
+            except (ValueError, RuntimeError, TypeError, AttributeError) as e:
+                print(f"Warning: Could not generate 3-day forecast: {e}")
+                # Fallback: use last 3 rolling predictions
+                if len(y_pred) >= 3:
+                    forecast_3day = y_pred[-3:]
+                elif len(y_pred) > 0:
+                    last_val = y_pred[-1]
+                    forecast_3day = np.concatenate([y_pred[-(min(len(y_pred), 3)-1):], [last_val] * max(0, 3 - len(y_pred))])
+                else:
+                    forecast_3day = np.array([45.2, 45.1, 46.3])
             
             print("CNN training complete!")
             print(f"  RMSE: {metrics_dict['RMSE']:.4f}")
@@ -435,7 +498,7 @@ class ModelTrainer:
                 'metrics': metrics_dict,
                 'y_pred': y_pred,
                 'y_actual': y_actual,
-                'forecast_3day': latest_forecast,
+                'forecast_3day': forecast_3day,
                 'current_aqi': float(self.train_data.iloc[-1]),
                 'model': self.cnn_model
             }
@@ -451,10 +514,22 @@ class ModelTrainer:
 sg.theme('LightBlue2')
 sg.set_options(font=('Arial', 10))
 
+# Cache EPA data at module load to avoid redundant I/O during GUI initialization
+_EPA_DATA_CACHE = None
+_EPA_DATA_CACHE_PATH = None
+
+def _load_epa_data_cache(data_path):
+    """Load EPA data once and cache it"""
+    global _EPA_DATA_CACHE, _EPA_DATA_CACHE_PATH
+    if _EPA_DATA_CACHE is None or _EPA_DATA_CACHE_PATH != str(data_path):
+        _EPA_DATA_CACHE = load_saved_epa_data(str(data_path))
+        _EPA_DATA_CACHE_PATH = str(data_path)
+    return _EPA_DATA_CACHE
 
 def get_available_pollutants(city, data_path=None):
     """
     Get available pollutants for a selected city from EPA data.
+    Uses cached EPA data to avoid redundant file I/O.
     
     Parameters:
     -----------
@@ -471,7 +546,8 @@ def get_available_pollutants(city, data_path=None):
         if data_path is None:
             data_path = Path(__file__).parent.parent / 'data' / 'epa_aqs_data_2025_cleaned.csv'
         
-        epa_data = load_saved_epa_data(str(data_path))
+        # Use cached EPA data instead of loading from disk
+        epa_data = _load_epa_data_cache(data_path)
         
         # Extract city name from "City, State" format
         city_name = city.split(',')[0].strip()
@@ -703,15 +779,45 @@ class AirQualityGUI:
             if cnn_result:
                 all_results.append(cnn_result)
             
-            # Find the best performing model based on RMSE (lower is better)
+            # Find the best performing model using intelligent metric selection
+            # Use MAPE as primary metric when available and RMSE values are similar
             best_result = None
-            best_rmse = float('inf')
+            best_metric_value = float('inf')
+            best_metric_name = 'RMSE'
             
+            # Collect all RMSE and MAPE values
+            rmse_values = []
+            mape_values = []
             for result in all_results:
                 if result and 'metrics' in result:
-                    rmse = result['metrics'].get('RMSE', float('inf'))
-                    if rmse < best_rmse:
-                        best_rmse = rmse
+                    rmse_values.append(result['metrics'].get('RMSE', float('inf')))
+                    mape_values.append(result['metrics'].get('MAPE', float('inf')))
+            
+            # Determine which metric to use for selection
+            use_mape = False
+            if rmse_values and mape_values:
+                # Calculate coefficient of variation for RMSE
+                valid_rmse = [r for r in rmse_values if r < float('inf')]
+                if valid_rmse:
+                    rmse_mean = np.mean(valid_rmse)
+                    rmse_std = np.std(valid_rmse)
+                    rmse_cv = rmse_std / rmse_mean if rmse_mean > 0 else float('inf')
+                    
+                    # If RMSE values are very similar (CV < 0.05 or 5% variation), use MAPE instead
+                    if rmse_cv < 0.05:
+                        use_mape = True
+                        best_metric_name = 'MAPE'
+            
+            # Select best model based on chosen metric
+            for result in all_results:
+                if result and 'metrics' in result:
+                    if use_mape:
+                        metric_value = result['metrics'].get('MAPE', float('inf'))
+                    else:
+                        metric_value = result['metrics'].get('RMSE', float('inf'))
+                    
+                    if metric_value < best_metric_value:
+                        best_metric_value = metric_value
                         best_result = result
             
             # Use best performing model for forecast display
@@ -722,7 +828,7 @@ class AirQualityGUI:
                 self.training_result['all_results'] = all_results
             
             best_model_name = self.training_result.get('model_name', 'Unknown') if self.training_result else 'Unknown'
-            self.update_status(f'Model training complete! Best model: {best_model_name} (RMSE: {best_rmse:.4f})', 'green')
+            self.update_status(f'Model training complete! Best model: {best_model_name} ({best_metric_name}: {best_metric_value:.4f})', 'green')
             self.is_training = False
             
         except (ValueError, RuntimeError, TypeError, AttributeError, IOError) as e:
@@ -872,7 +978,7 @@ class AirQualityGUI:
         self.create_window()
         
         while True:
-            event, values = self.window.read()
+            event, values = self.window.read(timeout=100)
             
             if event == sg.WINDOW_CLOSED or event == 'Exit':
                 break
