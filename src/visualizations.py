@@ -367,8 +367,12 @@ def plot_predictions_comparison(y_actual, y_pred, title_prefix, pollutant, figsi
     --------
     fig : matplotlib figure object
     """
+    # Ensure inputs are numpy arrays
+    y_actual = np.asarray(y_actual)
+    y_pred = np.asarray(y_pred)
+    
     # Flatten if multi-day predictions
-    if len(y_actual.shape) > 1:
+    if y_actual.ndim > 1:
         actual_flat = y_actual.flatten()
         pred_flat = y_pred.flatten()
     else:
@@ -518,14 +522,30 @@ def model_results_bar_chart(all_results, pollutant_focus, city_focus, figsize=(1
         fig.subplots_adjust(left=0.08, right=0.95, top=0.93, bottom=0.1)
         return fig
     
-    # Sort by RMSE (best/lowest to worst/highest) for left-to-right ranking
-    # RMSE is the primary metric for model selection
-    if 'RMSE' in results_df.columns:
-        results_df = results_df.sort_values('RMSE')
+    # Sort by best metric: use MAPE if RMSE values are very similar, otherwise use RMSE
+    sort_metric = 'RMSE'
+    ranking_description = 'RMSE'
+    
+    if 'RMSE' in results_df.columns and 'MAPE' in results_df.columns:
+        # Calculate coefficient of variation for RMSE
+        rmse_mean = results_df['RMSE'].mean()
+        rmse_std = results_df['RMSE'].std()
+        rmse_cv = rmse_std / rmse_mean if rmse_mean > 0 else float('inf')
+        
+        # If RMSE values are very similar (CV < 0.05 or 5% variation), use MAPE instead
+        if rmse_cv < 0.05:
+            sort_metric = 'MAPE'
+            ranking_description = 'MAPE (RMSE too similar across models)'
+    elif 'MAPE' in results_df.columns:
+        sort_metric = 'MAPE'
+        ranking_description = 'MAPE'
+    
+    if sort_metric in results_df.columns:
+        results_df = results_df.sort_values(sort_metric)
 
     fig, ax = plt.subplots(figsize=figsize)
     results_df[available_metrics].plot(kind='bar', ax=ax)
-    ax.set_title(f"Model Comparison: {pollutant_focus} in {city_focus}\n(Models Ranked Left-to-Right: Best → Worst by RMSE)", 
+    ax.set_title(f"Model Comparison: {pollutant_focus} in {city_focus}\n(Models Ranked Left-to-Right: Best → Worst by {ranking_description})", 
                 fontsize=14, fontweight='bold')
     ax.set_ylabel('Error Metric Value', fontsize=12)
     ax.set_xlabel('Model (Best ← → Worst)', fontsize=12)
