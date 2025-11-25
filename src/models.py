@@ -614,6 +614,156 @@ def predict_prophet(model_output, horizon=7):
 
 
 # =============================================================================
+# SECTION 6.4: 3-DAY AHEAD PREDICTIONS FROM LIVE DATA
+# =============================================================================
+
+def predict_3day_ahead_lstm_cnn(model, live_value, train_data):
+    """
+    Make 3-day ahead predictions using trained LSTM/CNN from a single live value.
+    
+    This uses the engineered features from the live AQI value and iteratively
+    predicts 3 days into the future.
+    
+    Parameters:
+    -----------
+    model : keras.Sequential
+        Trained LSTM or CNN model
+    live_value : float
+        Current AQI observation from AirNow
+    train_data : pd.Series
+        Training data (for feature context)
+    
+    Returns:
+    --------
+    np.ndarray : 3-day ahead predictions [day+1, day+2, day+3]
+    """
+    # Create engineered features from the live value
+    features = engineer_features_from_single_point(live_value, train_data=train_data)
+    
+    # Reshape for model input: (1 sample, lookback=1, 13 features)
+    X_input = np.expand_dims(features, axis=0)  # Add batch dimension: (13,) -> (1, 13)
+    X_input = np.expand_dims(X_input, axis=1)  # Add time dimension: (1, 13) -> (1, 1, 13)
+    
+    # Predict 3-day horizon (model outputs all 3 days at once)
+    predictions_3day = model.predict(X_input, verbose=0)
+    
+    # predictions_3day shape: (1, 3) - return as 1D array
+    return predictions_3day[0]  # Shape: (3,) - [day+1, day+2, day+3]
+
+
+def predict_3day_ahead_other_models(model, live_value, model_name, train_data=None):
+    """
+    Make 3-day ahead predictions using trained Naive, Prophet, or ARIMA models.
+    
+    For non-neural models, we make sequential 1-day ahead predictions.
+    
+    Parameters:
+    -----------
+    model : dict
+        Trained model output dictionary
+    live_value : float
+        Current AQI observation
+    model_name : str
+        Name of model ('Naive', 'Prophet', 'ARIMA')
+    train_data : pd.Series
+        Training data (for context)
+    
+    Returns:
+    --------
+    np.ndarray : 3-day ahead predictions [day+1, day+2, day+3]
+    """
+    predictions = []
+    
+    if model_name == 'Naive':
+        # Naive: repeat the last 7-day pattern
+        last_week = train_data.iloc[-7:].values if train_data is not None else np.array([live_value] * 7)
+        for i in range(3):
+            # Cycle through the week pattern
+            pred = last_week[i % 7]
+            predictions.append(pred)
+    
+    elif model_name == 'Prophet':
+        # Prophet: use the model to forecast next 3 days
+        # Requires making future dataframe
+        prophet_model = model.get('model')
+        if prophet_model:
+            future = prophet_model.make_future_dataframe(periods=3)
+            forecast = prophet_model.predict(future)
+            predictions = forecast['yhat'].values[-3:]
+    
+    elif model_name == 'ARIMA':
+        # ARIMA: use the fitted model to forecast next 3 days
+        arima_model = model.get('fitted_model')
+        if arima_model:
+            forecast = arima_model.get_forecast(steps=3)
+            predictions = forecast.predicted_mean.values
+    
+    return np.array(predictions) if predictions else np.array([live_value] * 3)
+
+
+# =============================================================================
+# SECTION 6.5: ROLLING 1-DAY PREDICTIONS FOR FAIR COMPARISON
+# =============================================================================
+
+def make_rolling_predictions_lstm_cnn(model, train_data, test_data, lookback=1):
+    """
+    Make rolling 1-day-ahead predictions with LSTM/CNN for fair comparison.
+    
+    This generates predictions for each day in the test set, using the 
+    engineered features, matching how other models (Naive, ARIMA, Prophet) 
+    are evaluated on a daily basis.
+    
+    Parameters:
+    -----------
+    model : keras.Sequential
+        Trained model
+    train_data : pd.Series
+        Training data (for feature context)
+    test_data : pd.Series
+        Test data to predict for
+    lookback : int
+        Lookback window (default: 1)
+    
+    Returns:
+    --------
+    np.ndarray : Rolling 1-day predictions (same length as test_data)
+    """
+    predictions = []
+    
+    # Combine train and test for rolling feature generation
+    combined = pd.concat([train_data, test_data])
+    
+    # For each day in the test set
+    for i in range(len(test_data)):
+        # Index in the combined series where this test day is
+        idx_in_combined = len(train_data) + i
+        
+        # Get the context: use the day itself and any previous lookback window
+        context_start = max(0, idx_in_combined - lookback + 1)
+        context_end = idx_in_combined + 1
+        
+        context_data = combined.iloc[context_start:context_end]
+        
+        # Create engineered features for the last value in context
+        features = engineer_features_from_single_point(
+            context_data.iloc[-1],
+            train_data=train_data
+        )
+        
+        # Reshape for model input: (1 sample, lookback=1, 13 features)
+        X_input = np.expand_dims(features, axis=0)  # (13,) -> (1, 13)
+        X_input = np.expand_dims(X_input, axis=1)  # (1, 13) -> (1, 1, 13)
+        
+        # Predict (will predict 3-day horizon, take first day)
+        y_pred_3day = model.predict(X_input, verbose=0)
+        pred_day1 = y_pred_3day[0, 0]  # Take first prediction from 3-day forecast
+        
+        predictions.append(pred_day1)
+    
+    return np.array(predictions)
+
+
+# =============================================================================
 # SECTION 7: MODEL 4 - LSTM (Long Short-Term Memory)
 # =============================================================================
 
@@ -706,15 +856,15 @@ def train_lstm_model(train_data, test_data, lookback=1, forecast_horizon=3,
         verbose=0
     )
     
-    # Make predictions
-    y_pred = model.predict(X_test, verbose=0)
+    # Make rolling 1-day predictions across the entire test set for fair comparison
+    y_pred_rolling = make_rolling_predictions_lstm_cnn(model, train_data, test_data, lookback=lookback)
     
     return {
         'model_name': 'LSTM',
         'model': model,
         'history': history,
-        'predictions': y_pred,
-        'y_test': y_test,
+        'predictions': y_pred_rolling,
+        'y_test': test_data.values,
         'X_test': X_test,
         'scaler': data_prep['scaler'],
         'lookback': lookback,
@@ -838,12 +988,15 @@ def train_cnn_model(train_data, test_data, lookback=1, forecast_horizon=3,
     # Make predictions
     y_pred = model.predict(X_test, verbose=0)
     
+    # Make rolling 1-day predictions across the entire test set for fair comparison
+    y_pred_rolling = make_rolling_predictions_lstm_cnn(model, train_data, test_data, lookback=lookback)
+    
     return {
         'model_name': 'CNN',
         'model': model,
         'history': history,
-        'predictions': y_pred,
-        'y_test': y_test,
+        'predictions': y_pred_rolling,
+        'y_test': test_data.values,
         'X_test': X_test,
         'scaler': data_prep['scaler'],
         'lookback': lookback,
